@@ -1,686 +1,108 @@
+---
+name: brdsc
+description: Evaluate module boundaries, responsibility ownership, dependency direction, business-rule authority, and architectural consistency during design, code review, or refactoring. Use when these decisions or an abstraction trade-off matter to the task. Do not activate for formatting, mechanical edits, or routine fixes that need no architectural judgment.
+---
+
 # BRDSC
 
-BRDSC is an engineering judgment framework for evaluating whether code and design form a coherent system, rather than merely solving the current problem.
+Use BRDSC to judge whether a change keeps the system coherent. It does not prescribe DDD, Clean Architecture, events, repositories, or any other architecture.
 
-BRDSC stands for:
+## Scope the Work
 
-* **B — Boundary**
-* **R — Responsibility**
-* **D — Dependency**
-* **S — Single Authority**
-* **C — Consistency**
+Follow the user's requested mode: review, design, or implementation. A review produces findings; it does not authorize refactoring. During implementation, use this framework to guide the requested change without expanding it into an architecture overhaul.
 
-The purpose of BRDSC is not to enforce a specific architecture such as DDD, Clean Architecture, Hexagonal Architecture, CQRS, or Event-Driven Architecture.
+Scale the investigation to the decision. For a small change, inspect the relevant dimensions and nearby context. Do not require a five-dimension report or assign numeric BRDSC scores.
 
-Its purpose is to help make consistent engineering judgments when there is no single obviously correct implementation.
+## Core Principles
 
----
+### B — Boundary
 
-## When to Use
+Separate concerns when differences in business meaning, ownership, lifecycle, security, consistency requirements, or rate of change justify a boundary.
 
-Use BRDSC when:
+Look for internal state or storage details leaking across modules, and unrelated changes repeatedly forcing modules to change together. File size, the number of calls, or different business nouns alone do not establish a boundary problem.
 
-* designing a new module or feature
-* reviewing code or pull requests
-* refactoring existing code
-* deciding where logic should live
-* evaluating abstractions
-* changing module dependencies
-* introducing new architectural patterns
-* deciding whether existing project conventions should be preserved
-* identifying why code feels fragmented or "not systematic"
+### R — Responsibility
 
-Do not use BRDSC as a mechanical lint checklist.
+Give each kind of behavior a stable, discoverable owner. Distinguish protocol handling, workflow coordination, business decisions, persistence, and external integration according to the project's architecture; these are categories to investigate, not mandatory layers.
 
-BRDSC is primarily a reasoning framework.
+Coordinating several capabilities can be a valid application-service responsibility. Investigate whether the coordinator delegates to their owners or redefines their internals. Name responsibilities by purpose, such as enforcing refund eligibility or coordinating payment, rather than by extraction opportunities.
 
----
+### D — Dependency
 
-# Core Principles
+Keep dependencies intentional and consistent with the project's boundaries. Inspect cycles, callers depending on implementation details, transport types crossing inappropriate boundaries, and technical dependencies forcing unrelated business changes.
 
-## B — Boundary
+Prefer stable concepts depending on stable contracts when that separation matters. Introduce an interface or invert a dependency only when there is a concrete boundary to protect; a database import or vendor SDK is a signal to investigate, not sufficient evidence of a defect.
 
-Modules and business concepts should have clear boundaries.
+### S — Single Authority
 
-Ask:
+Give each important business rule an identifiable authoritative meaning and owner. Trace whether HTTP, RPC, consumers, jobs, and administrative paths share that meaning or independently redefine it. Defensive validation at multiple layers can be legitimate.
 
-* What concept does this code belong to?
-* Which module owns this behavior?
-* Is this code crossing a module boundary?
-* Does one module know too much about another module's internals?
-* Are two independently changing concerns being mixed together?
-* Could this change cause unrelated modules to change together?
+Distinguish **semantic ownership** from **atomic enforcement**. A business capability may define its contract through an entity method, application service, repository operation, or database constraint, according to the project. Do not require an entity method or duplicate a rule in application code merely because its enforcement lives in SQL.
 
-A good boundary separates concepts that have different responsibilities, change drivers, ownership, or lifecycle.
+For example, `MarkAsPaid` can own the pending-to-paid transition through a conditional update and consistent handling of the affected-row count. Database constraints, locking, conditional updates, and transactions may be essential to correctness. An in-memory `Order.Pay()` check alone does not prevent concurrent requests from both acting on stale state.
 
-Do not create boundaries merely to make the architecture appear cleaner.
+Check bypass paths, concurrent execution, retries, and related side effects where relevant. An atomic status transition does not by itself make an external charge or notification idempotent. One source of business truth does not imply one physical validation statement.
 
-A boundary should have an engineering reason.
+### C — Consistency
 
-Typical signals of weak boundaries:
+Inspect how comparable code handles transactions, persistence, errors, state transitions, retries, and module dependencies before introducing a different approach.
 
-* one service coordinates many unrelated domains
-* modules directly modify each other's internal state
-* internal database structures leak across modules
-* unrelated features repeatedly change the same package
-* a module exposes implementation details instead of domain capabilities
+For example, preserve a deliberate `repo.MarkAsPaid(ctx, id, version, paidAt)` convention unless there is a concrete reason to replace it with `repo.Save(ctx, order)`. Consistency concerns the underlying decision, not superficial syntax. When conventions conflict, identify which examples are relevant and why; do not infer a repository-wide standard from one file.
 
----
+## Investigation and Decision Process
 
-## R — Responsibility
+### 1. Establish the Behavior and Constraints
 
-The same kind of responsibility should have a stable owner.
+Identify the requested behavior, business invariant, affected data, side effects, and any stated failure or consistency requirements. For a review, distinguish changes introduced by the diff from pre-existing issues. For design work without code, use the supplied requirements and mark unverified assumptions.
 
-Ask:
+Do not invent future requirements to justify abstraction. Distinguish a demonstrated source of change from a hypothetical extension.
 
-* Who should be responsible for this behavior?
-* Is this orchestration, business logic, persistence, integration, validation, or presentation?
-* Where does similar logic currently live?
-* Would a future engineer know where to add the next piece of similar logic?
-* Is one component accumulating unrelated responsibilities?
+### 2. Gather Evidence Around the Decision
 
-The goal is not to make every class or function do exactly one tiny thing.
+Start with the changed or proposed capability. Follow relevant callers and callees far enough to establish ownership and observable behavior. When correctness depends on persistence or retries, inspect the transaction boundary, write conditions, error handling, and side-effect ordering.
 
-The goal is stable responsibility ownership.
+Search for comparable implementations, tests, and architecture guidance. Read enough context to understand whether a pattern is deliberate, legacy, or transitional. Expand the search when evidence conflicts or a bypass path remains unresolved; stop when the decision is supported rather than auditing the entire repository by default.
 
-For example:
+Keep these distinctions explicit in the reasoning:
 
-* transport layers handle protocol concerns
-* application layers coordinate workflows
-* domain logic protects business rules
-* repositories handle persistence semantics
-* infrastructure handles external systems
+* **Observed:** code, tests, documentation, or supplied requirements that establish a fact.
+* **Inferred:** a consequence derived from those facts, with the trigger and reasoning explained.
+* **Unknown:** an assumption whose truth would change the recommendation.
 
-These are examples, not mandatory layers.
+Do not infer transaction, retry, or lifecycle semantics from names alone. When a material requirement is unavailable, state the limitation and make the recommendation conditional or ask a focused question. Evidence insufficient to justify redesign is a reason to preserve the current structure, not proof that its behavior is correct.
 
-Judge responsibility relative to the architecture already established by the project.
+### 3. Identify the Design Pressure
 
----
+Use the relevant BRDSC dimensions to explain a concrete pressure: protecting an invariant, isolating independently changing concerns, preserving a dependency boundary, removing duplicated business meaning, or separating confirmed failure and retry requirements.
 
-## D — Dependency
+Introduce an abstraction only when its benefit addresses that pressure and justifies its added indirection and maintenance cost. An established abstraction can be reused without inventing a new one. Do not automatically map a conditional to a strategy, a state change to a state machine, or a cross-module call to an event.
 
-Dependencies should have a clear and intentional direction.
+### 4. Choose the Smallest Coherent Change
 
-Ask:
+Prefer explicit code, existing capabilities, and local changes when they satisfy the requirements. **No change** is a valid conclusion. A coordinator owning a workflow or defensive checks repeating part of a rule do not by themselves require refactoring.
 
-* Who depends on whom?
-* Is this dependency expected by the architecture?
-* Is a lower-level business concept depending on a higher-level technical detail?
-* Is a module reaching across layers because doing so is convenient?
-* Would replacing an infrastructure implementation force business logic to change?
-* Is this dependency creating a cycle?
+When principles conflict, prioritize correctness and data integrity, then ownership and necessary dependency boundaries, then existing conventions and abstraction elegance. Explain the trade-off; do not treat the order as a scoring formula.
 
-Prefer dependency relationships that preserve conceptual stability.
+Break a convention when concrete evidence shows it causes harm. Identify the replacement principle, the affected paths, and whether the change is local or needs migration. Temporary coexistence can be appropriate when the boundary and migration path are explicit; do not turn a local fix into a system-wide rewrite.
 
-Stable business concepts should generally not depend on volatile technical details unless the project deliberately follows a different architecture.
+### 5. Verify the Relevant Consequences
 
-Avoid introducing abstractions solely for dependency inversion.
+For implementation, preserve the requested behavior and verify the properties the design relies on. Choose checks according to the risk: boundary or dependency checks for structural changes; competing writes for concurrency; repeated delivery for idempotency; rollback or failure paths for transactions and side effects. Use existing project checks where appropriate; do not add tests that merely mirror code structure.
 
-An abstraction is useful only when the dependency boundary matters.
+For review or design, identify the verification needed to resolve uncertainty. Report what was actually inspected or tested, and distinguish proposed checks from completed ones.
 
----
+## Output
 
-## S — Single Authority
+Lead with the conclusion and adapt the detail to the user's task. Use these elements when useful, without imposing fixed headings on every response:
 
-Each important business rule should have one authoritative expression.
+* **Review:** report actionable findings with a concrete file/symbol location, observed behavior, triggering condition, consequence, relevant principle, and smallest improvement. Distinguish defects from optional design suggestions and pre-existing issues. Rank findings by impact; do not manufacture one for every dimension. If no supported issue remains, say so and state any material coverage limit.
+* **Design:** recommend an owner, boundary, and dependency direction; explain the relevant trade-off, assumptions, and why the added complexity is justified. Compare alternatives only when they change the decision.
+* **Implementation:** explain the resulting behavior, the scope of the change, and validation performed. Mention unresolved risks that affect the result.
 
-This does not mean a rule can appear only once in the entire system.
+Avoid unsupported labels such as “unclear responsibilities,” “not DDD,” or “use events.” Ground advice in observable consequences. Do not present assumed business requirements as evidence.
 
-Defensive validation, database constraints, API validation, and integrity checks may legitimately duplicate parts of a rule.
+## Examples on Demand
 
-The key question is:
+Read [references/cases.md](references/cases.md) when judging workflow orchestration, database-enforced rules, a harmful existing convention, or insufficient evidence about asynchronous side effects. The cases are illustrative; their requirements do not establish facts about the user's project.
 
-> Where is the authoritative business meaning defined?
-
-Ask:
-
-* What is the business invariant?
-* Where is it enforced?
-* Can another code path bypass this rule?
-* Are multiple modules independently defining the same rule?
-* If the rule changes, how many places must change?
-* Could two implementations gradually develop different semantics?
-
-Example:
-
-If an order can only be paid while it is pending, there should be one authoritative business rule representing that transition.
-
-Prefer:
-
-```go
-func (o *Order) Pay(paidAt time.Time) error {
-    if o.Status != StatusPending {
-        return ErrInvalidOrderStatus
-    }
-
-    o.Status = StatusPaid
-    o.PaidAt = &paidAt
-    return nil
-}
-```
-
-over independently implementing the same transition semantics in handlers, consumers, services, and jobs.
-
-Single Authority means:
-
-**one source of business truth, not necessarily one physical validation statement.**
-
----
-
-## C — Consistency
-
-Similar problems should usually be solved in similar ways.
-
-Before introducing a design, inspect how the project already solves the same category of problem.
-
-Ask:
-
-* How does this repository normally represent persistence?
-* How are transactions handled elsewhere?
-* How are business errors represented?
-* How are cross-module side effects handled?
-* How are asynchronous workflows implemented?
-* How are state transitions represented?
-* How are similar modules structured?
-* Am I strengthening the existing architecture or introducing a second architecture?
-
-Do not automatically replace an existing convention because another pattern appears theoretically cleaner.
-
-For example, if the project consistently uses:
-
-```go
-repo.MarkAsPaid(ctx, id, version, paidAt)
-```
-
-do not automatically replace one repository with:
-
-```go
-repo.Save(ctx, order)
-```
-
-simply because aggregate persistence looks more aligned with DDD.
-
-First determine what repository means in this codebase.
-
-Consistency is not blind conformity.
-
-Break an existing convention when there is a clear architectural reason, and make the change explicit.
-
----
-
-# BRDSC Reasoning Process
-
-When reviewing or designing code, do not immediately recommend a pattern.
-
-Follow this sequence.
-
-## Step 1 — Understand the Change
-
-Identify:
-
-* what behavior is being added or changed
-* what business concept is involved
-* what data is affected
-* what side effects occur
-* what failure modes exist
-* what is expected to change independently in the future
-
-Do not reason from isolated functions if broader project context is available.
-
----
-
-## Step 2 — Inspect Existing Project Conventions
-
-Before recommending a new abstraction, search the project for similar cases.
-
-Determine:
-
-* existing module boundaries
-* responsibility placement
-* dependency patterns
-* transaction patterns
-* error handling
-* persistence conventions
-* event conventions
-* naming conventions
-* similar business rules
-
-Prefer learning the architecture before judging it.
-
----
-
-## Step 3 — Evaluate BRDSC
-
-### Boundary
-
-Determine whether responsibilities and concepts remain properly separated.
-
-### Responsibility
-
-Determine whether the behavior has an appropriate and stable owner.
-
-### Dependency
-
-Determine whether dependencies remain intentional and directional.
-
-### Single Authority
-
-Determine whether business invariants retain one authoritative definition.
-
-### Consistency
-
-Determine whether the solution fits the project's established engineering model.
-
----
-
-## Step 4 — Identify the Real Design Pressure
-
-Do not introduce abstraction without identifying the pressure that justifies it.
-
-Useful design pressures include:
-
-* protecting a business invariant
-* isolating independently changing concerns
-* preventing architectural dependency violations
-* supporting different failure or retry semantics
-* removing meaningful duplication
-* establishing an explicit transaction boundary
-* handling scalability differences
-* separating lifecycle ownership
-* following an established project convention
-
-If none of these pressures exist, prefer the simpler design.
-
----
-
-## Step 5 — Recommend the Smallest Coherent Change
-
-Prefer the smallest change that improves system coherence.
-
-Avoid rewriting architecture merely because a different design is theoretically cleaner.
-
-Recommendations should preserve local consistency unless there is a strong reason to change the architecture itself.
-
----
-
-# Avoid Architectural Formalism
-
-BRDSC must not become architecture ceremony.
-
-Do not automatically conclude:
-
-* every business object needs an aggregate
-* every cross-module call requires an event
-* every conditional needs a strategy pattern
-* every database access needs another abstraction
-* every service must be split
-* every state change requires a state machine
-* every duplicate line requires abstraction
-* every module must follow DDD
-
-Architecture exists to manage change and complexity.
-
-If the problem is simple, the solution should remain simple.
-
----
-
-# Abstraction Rule
-
-Introduce an abstraction only when it does at least one meaningful thing:
-
-* protects a business invariant
-* isolates an independently changing concern
-* creates a necessary dependency boundary
-* removes meaningful conceptual duplication
-* provides independent failure or retry behavior
-* represents an important domain concept
-* follows an already established project convention
-
-Do not abstract merely to make code appear architecturally sophisticated.
-
----
-
-# Consistency vs Improvement
-
-Existing consistency is valuable, but consistency does not justify preserving a clearly harmful architecture forever.
-
-When an existing pattern should change:
-
-1. identify the concrete problem
-2. explain why the existing pattern causes it
-3. define the new principle
-4. decide whether the migration is local or system-wide
-5. avoid leaving two competing architectural models without a migration strategy
-
-A local improvement that creates a second architecture may make the system worse overall.
-
-Always ask:
-
-> Is this change improving the system, or merely creating another way to solve the same problem?
-
----
-
-# Review Style
-
-Do not produce vague architectural feedback.
-
-Avoid comments such as:
-
-* "This design is bad."
-* "This is not DDD."
-* "This should be decoupled."
-* "Responsibilities are unclear."
-* "This violates clean architecture."
-* "Use events here."
-
-Instead explain the reasoning.
-
-Use this format when useful:
-
-## Observation
-
-Describe what the code currently does.
-
-## Principle
-
-Identify the relevant BRDSC dimension.
-
-## Evidence
-
-Point to concrete code structure or behavior.
-
-## Risk
-
-Explain what type of future problem this design creates.
-
-## Direction
-
-Describe the architectural direction of improvement.
-
-## Scope
-
-State whether the issue requires:
-
-* no change
-* local refactoring
-* module-level change
-* architecture-level change
-
-Example:
-
-### Observation
-
-`PaymentService` currently performs:
-
-* payment orchestration
-* order state transition
-* point allocation
-* coupon issuance
-* user notification
-
-### Principle
-
-Boundary / Responsibility
-
-### Evidence
-
-These behaviors have different lifecycle, retry, and failure semantics.
-
-### Risk
-
-Future additions such as loyalty levels, marketing notifications, and warehouse synchronization will continue expanding the payment workflow and increase coupling.
-
-### Direction
-
-Keep the core payment transaction in the payment workflow and move independently retryable side effects behind the project's existing asynchronous mechanism.
-
-Do not introduce a new event architecture if the project already has another established mechanism that solves the same problem.
-
----
-
-# Questions to Ask Before Making a Design Decision
-
-Use these questions as a reasoning aid.
-
-### Concept
-
-* What business or technical concept is this code representing?
-* Is that concept explicit in the current design?
-
-### Ownership
-
-* Who should own this behavior?
-* Does similar behavior already have an owner?
-
-### Change
-
-* Why is this code likely to change?
-* What should be able to change independently?
-
-### Invariant
-
-* What must always remain true?
-* Where is that rule authoritatively enforced?
-* Can another path bypass it?
-
-### Dependency
-
-* What does this component depend on?
-* Is that dependency conceptually correct?
-* Could this dependency introduce cycles or inappropriate coupling?
-
-### Consistency
-
-* How does this project solve similar problems?
-* Am I following an existing pattern?
-* If I am breaking it, why?
-
-### Complexity
-
-* Is the proposed abstraction solving a real problem?
-* Would a simpler implementation remain understandable and safe?
-
-### Evolution
-
-* If three similar requirements are added later, what will this design become?
-* Does the design make future changes more local or more distributed?
-
----
-
-# Business Rule Detection
-
-Treat a rule as a likely business invariant when it expresses something that must remain true regardless of entry point.
-
-Examples:
-
-* an order cannot be paid twice
-* a refund cannot exceed the paid amount
-* inventory cannot become negative
-* an employee allocation cannot exceed the allowed ratio
-* an account cannot transition directly from closed to active
-* a coupon cannot be used after expiration
-
-Such rules should not live only in:
-
-* HTTP validation
-* UI validation
-* individual consumers
-* scheduled jobs
-* database update statements
-
-Those may enforce the rule defensively, but they should not become independent definitions of business meaning.
-
----
-
-# Entry Points Are Not Business Authorities
-
-A system may have many entry points:
-
-* HTTP
-* RPC
-* message consumer
-* cron job
-* admin tool
-* migration script
-
-Do not allow each entry point to independently implement core business semantics.
-
-Prefer:
-
-```text
-HTTP ───────┐
-RPC ────────┤
-Consumer ───┼──> Business Capability
-Cron ───────┤
-Admin ──────┘
-```
-
-over:
-
-```text
-HTTP      -> business rule A
-RPC       -> business rule A'
-Consumer  -> business rule A''
-Cron      -> business rule A'''
-```
-
----
-
-# Boundary Detection
-
-Possible indicators that two concerns deserve separate boundaries:
-
-* different owners
-* different lifecycle
-* different scaling requirements
-* different consistency requirements
-* different failure semantics
-* different security boundaries
-* different business language
-* different rates of change
-
-Do not split modules based only on file size or line count.
-
----
-
-# Responsibility Detection
-
-A responsibility is not simply "a block of code that can be extracted."
-
-A responsibility should describe why the code exists.
-
-Weak responsibility:
-
-> processOrderData
-
-Stronger responsibilities:
-
-* calculate payable amount
-* enforce refund eligibility
-* persist order aggregate
-* publish order state changes
-* translate HTTP input
-* coordinate payment workflow
-
-Prefer responsibility boundaries based on purpose rather than implementation mechanics.
-
----
-
-# Dependency Detection
-
-Watch for:
-
-* domain packages importing database clients
-* application code depending directly on transport DTOs
-* repositories calling HTTP handlers
-* infrastructure packages defining business semantics
-* circular module references
-* utility packages becoming global dependency hubs
-* business logic importing vendor SDKs unnecessarily
-
-Not every dependency requires inversion.
-
-Invert a dependency when the boundary matters.
-
----
-
-# Consistency Detection
-
-Search for existing answers before inventing a new one.
-
-Useful searches include:
-
-* similar repository methods
-* similar state transitions
-* existing events
-* transaction wrappers
-* error types
-* retry mechanisms
-* dependency injection patterns
-* package layout
-* interface placement
-* validation conventions
-
-Consistency applies to decisions, not superficial syntax.
-
-Two implementations can look different while still following the same architectural principle.
-
----
-
-# BRDSC Is Not a Score
-
-Do not assign numeric scores to BRDSC dimensions.
-
-Do not require all five dimensions to be maximized simultaneously.
-
-Engineering involves trade-offs.
-
-Examples:
-
-* improving Boundary may temporarily reduce Consistency during a migration
-* preserving Consistency may be preferable to introducing a theoretically cleaner Dependency model
-* reducing Responsibility overlap may introduce unnecessary abstraction in a small module
-
-Explain trade-offs instead of scoring them.
-
----
-
-# Priority Order
-
-When principles conflict, reason using this approximate priority:
-
-1. correctness and business invariants
-2. safety and data integrity
-3. clear ownership and boundaries
-4. dependency integrity
-5. consistency with existing architecture
-6. abstraction elegance
-
-This is guidance, not an absolute rule.
-
----
-
-# Default Bias
-
-When evidence is insufficient:
-
-* prefer the existing project convention
-* prefer fewer abstractions
-* prefer explicit code
-* prefer local changes
-* avoid introducing a second architectural model
-
-Do not redesign the system based on isolated code.
-
----
-
-# Final Review Question
-
-Before recommending a change, ask:
-
-> Does this change make the system more coherent, or does it merely make this piece of code look cleaner?
-
-The goal of BRDSC is system coherence.
-
-Not architectural purity.
-
+Before recommending a change, ask: does this improve system coherence, and what evidence supports that conclusion?
