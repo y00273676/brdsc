@@ -1,5 +1,7 @@
 # BRDSC
 
+English | [简体中文](README.zh-CN.md)
+
 **BRDSC** is an engineering judgment framework for keeping code and design coherent as a system.
 
 * **B — Boundary**
@@ -87,6 +89,7 @@ They illustrate how different evidence leads to different recommendations. They 
 ```text
 brdsc/
 ├── README.md
+├── README.zh-CN.md
 ├── SKILL.md
 └── references/
     └── cases.md
